@@ -13,7 +13,6 @@ app = Flask(__name__)
 pending_command = None
 drive = None
 
-# --- FUNCIÓN DE AUTENTICACIÓN ---
 def authenticate_gdrive():
     secrets_json_str = os.environ.get('GOOGLE_CLIENT_SECRETS')
     if not secrets_json_str:
@@ -22,10 +21,14 @@ def authenticate_gdrive():
     
     gauth = GoogleAuth()
     gauth.auth_method = 'service'
-    gauth.credentials = gauth.get_credentials_from_service_account(
+    
+    # --- ESTA ES LA LÍNEA CORREGIDA ---
+    gauth.credentials = GoogleAuth.get_credentials_from_service_account(
         service_account_dict=secrets_dict,
         scopes=['https://www.googleapis.com/auth/drive']
     )
+    # -----------------------------------
+    
     gauth.Authorize()
     return GoogleDrive(gauth)
 
