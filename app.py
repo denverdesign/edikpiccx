@@ -18,34 +18,18 @@ drive = None
 
 # --- FUNCIÓN DE AUTENTICACIÓN (VERSIÓN CORREGIDA) ---
 def authenticate_gdrive():
-    """
-    Versión final y correcta para autenticación con Cuentas de Servicio
-    usando la librería google-auth directamente.
-    """
     secrets_json_str = os.environ.get('GOOGLE_CLIENT_SECRETS')
     if not secrets_json_str:
         raise Exception("Variable de entorno 'GOOGLE_CLIENT_SECRETS' no encontrada.")
     
-    # Cargamos el diccionario desde la cadena de texto JSON
     secrets_dict = json.loads(secrets_json_str)
-    
-    # Definimos los alcances (permisos) que necesitamos
     scopes = ['https://www.googleapis.com/auth/drive']
     
-    # Creamos las credenciales directamente desde el diccionario de secretos
-    credentials = Credentials.from_service_account_info(
-        secrets_dict, 
-        scopes=scopes
-    )
+    credentials = Credentials.from_service_account_info(secrets_dict, scopes=scopes)
     
-    # Creamos el objeto de autenticación y le asignamos las credenciales
     gauth = GoogleAuth()
     gauth.credentials = credentials
     
-    # Autorizamos (esto es opcional pero una buena práctica para asegurar que todo está bien)
-    gauth.Authorize()
-    
-    # Devolvemos el objeto drive listo para usar
     return GoogleDrive(gauth)
 
 # --- ENDPOINTS ---
