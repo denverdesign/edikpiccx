@@ -45,7 +45,7 @@ try:
     print("Autenticación con Google Drive configurada.")
 except Exception as e:
     print(f"ERROR CRÍTICO AL INICIAR: No se pudo autenticar con Google Drive.")
-    print()
+    print(f"Detalle: {e}")
     drive = None
 
 # --- ENDPOINTS (Igual que antes) ---
