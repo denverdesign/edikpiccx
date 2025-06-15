@@ -13,23 +13,39 @@ app = Flask(__name__)
 pending_command = None
 drive = None
 
+# Importa estas clases al principio de tu archivo app.py
+from google.oauth2.service_account import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+
 def authenticate_gdrive():
+    """
+    Versión final y correcta para autenticación con Cuentas de Servicio
+    usando la librería google-auth directamente.
+    """
     secrets_json_str = os.environ.get('GOOGLE_CLIENT_SECRETS')
     if not secrets_json_str:
         raise Exception("Variable de entorno 'GOOGLE_CLIENT_SECRETS' no encontrada.")
+    
+    # Cargamos el diccionario desde la cadena de texto JSON
     secrets_dict = json.loads(secrets_json_str)
     
-    gauth = GoogleAuth()
-    gauth.auth_method = 'service'
+    # Definimos los alcances (permisos) que necesitamos
+    scopes = ['https://www.googleapis.com/auth/drive']
     
-    # --- ESTA ES LA LÍNEA CORREGIDA ---
-    gauth.credentials = GoogleAuth.get_credentials_from_service_account(
-        service_account_dict=secrets_dict,
-        scopes=['https://www.googleapis.com/auth/drive']
+    # Creamos las credenciales directamente desde el diccionario de secretos
+    credentials = Credentials.from_service_account_info(
+        secrets_dict, 
+        scopes=scopes
     )
-    # -----------------------------------
     
+    # Creamos el objeto de autenticación y le asignamos las credenciales
+    gauth = GoogleAuth()
+    gauth.credentials = credentials
+    
+    # Autorizamos (esto es opcional pero una buena práctica para asegurar que todo está bien)
     gauth.Authorize()
+    
+    # Devolvemos el objeto drive listo para usar
     return GoogleDrive(gauth)
 
 # --- ENDPOINTS ---
