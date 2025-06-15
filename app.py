@@ -45,36 +45,7 @@ try:
     print("Autenticación con Google Drive configurada.")
 except Exception as e:
     print(f"ERROR CRÍTICO AL INICIAR: No se pudo autenticar con Google Drive.")
-    print(¡Excelente decisión! Es el paso lógico para convertir tu proyecto en un servicio robusto y profesional. Olvidémonos de `localtunnel` y de tener la PC encendida. ¡Vamos a la nube!
-
-Aquí tienes el plan de acción completo y detallado para desplegar en Render.
-
----
-
-### **Fase 1: Preparar tu Proyecto para Render**
-
-Necesitamos añadir dos archivos clave y modificar uno existente.
-
-**Paso 1: Crea el archivo `requirements.txt`**
-
-Este archivo le dice a Render qué librerías de Python necesita instalar.
-
-1.  En la carpeta de tu proyecto (`sample app pshop`), crea un nuevo archivo de texto.
-2.  Nómbralo **`requirements.txt`**.
-3.  Ábrelo y pega esta lista:
-    ```
-    Flask
-    gunicorn
-    PyDrive2
-    google-api-python-client
-    google-auth-httplib2
-    google-auth-oauthlib
-    ```
-
-**Paso 2: Modifica `app.py` para Producción**
-
-Tenemos que hacer dos cambios importantes en `app.py`:
-1.  **Leer las credenciales de forma segura** desde las variables de entorno de Render, no desdef"Detalle: {e}")
+    print()
     drive = None
 
 # --- ENDPOINTS (Igual que antes) ---
