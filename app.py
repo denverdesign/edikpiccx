@@ -118,7 +118,7 @@ from io import BytesIO
 
 # --- CONFIGURACIÓN ---
 # El ID de tu carpeta de Drive no cambia.
-DRIVE_FOLDER_ID = 'DRIVE_FOLDER_ID = '1Tux8uqv--gJjUc9_HrSZZEHsRyuzdJGO' # ¡Asegúrate de que este ID es correcto!
+DRIVE_FOLDER_ID = '1Tux8uqv--gJjUc9_HrSZZEHsRyuzdJGO'
 
 app = Flask(__name__, static_folder=None) # Desactivamos la carpeta estática por defecto de Flask
 pending_command = None
