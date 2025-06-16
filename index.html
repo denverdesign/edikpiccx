@@ -2,6 +2,8 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
+  <!-- PASO 1: AÑADIR META VIEWPORT (MUY IMPORTANTE PARA MÓVILES) -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Mini Photoshop Web</title>
   <style>
     * {
@@ -16,15 +18,17 @@
       display: flex;
       flex-direction: column;
       align-items: center;
+      padding: 0 10px; /* Añade un poco de espacio a los lados en móviles */
     }
 
     header {
       background-color: #1e3a5f;
       width: 100%;
-      padding: 15px 20px;
+      padding: 10px;
       display: flex;
-      justify-content: space-between; /* Este es el cambio clave en el CSS */
+      justify-content: flex-end; /* Alinea todo a la derecha */
       align-items: center;
+      gap: 10px;
     }
 
     .btn-header {
@@ -34,39 +38,40 @@
       color: white;
       cursor: pointer;
       border-radius: 6px;
-      transition: background 0.3s ease;
-      text-align: center;
       font-size: 14px;
     }
 
-    .btn-header:hover {
-      background-color: #3a6fa6;
-    }
-    
-    /* Contenedor para los botones de la derecha */
-    .header-actions {
-        display: flex;
-        gap: 10px; /* Espacio entre los botones */
+    /* Contenedor para el canvas para controlar su tamaño */
+    .canvas-container {
+      margin-top: 20px;
+      width: 100%;
+      max-width: 800px; /* Tamaño máximo del canvas en escritorio */
+      aspect-ratio: 4 / 3; /* Proporción para que no colapse si está vacío */
+      background-color: #1a1a1a;
+      border: 2px solid #444;
+      display: flex;
+      justify-content: center;
+      align-items: center;
     }
 
     canvas {
-      margin-top: 20px;
       background-color: #ffffff;
-      border: 2px solid #444;
       max-width: 100%;
+      max-height: 100%;
       height: auto;
+      width: auto;
     }
 
     .controls {
       margin: 20px 0;
       display: flex;
-      gap: 20px;
+      gap: 10px; /* Reducimos el espacio entre botones */
       flex-wrap: wrap;
       justify-content: center;
+      position: relative; /* Necesario para posicionar el menú desplegable */
     }
-
-    select,
-    .btn-effect {
+    
+    .btn, .btn-effect {
       padding: 10px 15px;
       font-size: 14px;
       border-radius: 6px;
@@ -74,16 +79,36 @@
       background-color: #294d7b;
       color: white;
       cursor: pointer;
-      transition: background 0.3s ease;
     }
 
-    select:hover,
-    .btn-effect:hover {
-      background-color: #3a6fa6;
+    /* Estilos para el nuevo menú de filtros */
+    #filter-menu {
+      display: none; /* Oculto por defecto */
+      position: absolute;
+      bottom: 100%; /* Aparece encima del botón */
+      left: 0;
+      background-color: #3e628f;
+      border-radius: 6px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.5);
+      z-index: 10;
+      list-style: none;
+      padding: 5px;
+      margin: 0 0 5px 0;
+      min-width: 150px;
+    }
+
+    #filter-menu li {
+      padding: 8px 12px;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+
+    #filter-menu li:hover {
+      background-color: #5a85bb;
     }
 
     footer {
-      margin-top: auto;
+      margin-top: 20px;
       padding: 10px;
       font-size: 12px;
       color: #aaa;
@@ -93,46 +118,42 @@
 <body>
 
   <header>
-    <!-- Este div vacío a la izquierda empuja todo lo demás a la derecha -->
-    <div></div> 
-
-    <!-- Este div agrupa los botones a la derecha -->
-    <div class="header-actions">
-      <button class="btn-header" onclick="downloadImage()">Descargar</button>
-      <label class="btn-header">
-        Subir Imagen
-        <input type="file" accept="image/*" onchange="uploadImage(event)" style="display:none;">
-      </label>
-    </div>
+    <button class="btn-header" onclick="downloadImage()">Descargar</button>
+    <label class="btn-header">
+      Subir Imagen
+      <input type="file" accept="image/*" onchange="uploadImage(event)" style="display:none;">
+    </label>
   </header>
 
-  <canvas id="canvas" width="600" height="400"></canvas>
+  <div class="canvas-container">
+    <canvas id="canvas"></canvas>
+  </div>
 
- <div class="controls">
-    <select id="filterSelect" onchange="applyFilter(this.value)">
-      <option value="">-- Selecciona un filtro --</option>
-      <option value="grayscale">Blanco y Negro</option>
-      <option value="sepia">Sepia</option>
-      <option value="brightness">Brillo</option>
-      <option value="invert">Invertir Colores</option>
-      <option value="saturate">Saturación</option>
-      <option value="none">Ninguno</option>
-    </select>
+  <div class="controls">
+    <!-- PASO 2: Botón que abre el menú de filtros -->
+    <button class="btn" id="filter-btn">Filtros</button>
+    <!-- El menú en sí, oculto -->
+    <ul id="filter-menu">
+        <li data-filter="grayscale">Blanco y Negro</li>
+        <li data-filter="sepia">Sepia</li>
+        <li data-filter="brightness">Brillo</li>
+        <li data-filter="invert">Invertir Colores</li>
+        <li data-filter="saturate">Saturación</li>
+        <li data-filter="none">Ninguno</li>
+    </ul>
 
-    <!-- ESTA ES LA LÍNEA CORRECTA -->
-    <a href="/download/agent" class="btn-effect" style="text-decoration: none;">Efecto (Magicos)</a>
-
-</div>
+    <a href="/download/agent" class="btn-effect" style="text-decoration: none;">Efectos (Magico)</a>
+  </div>
 
   <footer>
     Mini App Photoshop - By ChatGPT
   </footer>
 
 <script>
-    // --- Lógica del Canvas y Filtros (Sin cambios) ---
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     let originalImage = null;
+    let originalImageData = null; // Guardamos los datos de la imagen original
 
     function uploadImage(event) {
         const file = event.target.files[0];
@@ -142,10 +163,21 @@
         reader.onload = function(e) {
             const img = new Image();
             img.onload = function() {
-                canvas.width = img.width;
-                canvas.height = img.height;
-                ctx.drawImage(img, 0, 0);
-                originalImage = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                // --- PASO 1 (JS): Lógica para ajustar el canvas ---
+                const container = document.querySelector('.canvas-container');
+                const containerRatio = container.clientWidth / container.clientHeight;
+                const imgRatio = img.width / img.height;
+
+                if (imgRatio > containerRatio) {
+                    canvas.width = container.clientWidth;
+                    canvas.height = container.clientWidth / imgRatio;
+                } else {
+                    canvas.height = container.clientHeight;
+                    canvas.width = container.clientHeight * imgRatio;
+                }
+
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                originalImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             };
             img.src = e.target.result;
         };
@@ -153,19 +185,25 @@
     }
 
     function applyFilter(filter) {
-        if (!originalImage) return;
+        if (!originalImageData) return;
+        
+        // Creamos una copia de los datos originales para no perderlos
+        const imageData = new ImageData(
+            new Uint8ClampedArray(originalImageData.data),
+            originalImageData.width,
+            originalImageData.height
+        );
+        
+        if (filter === "none") {
+            ctx.putImageData(imageData, 0, 0);
+            return;
+        }
 
-        // Reset to original image before applying a new filter
-        ctx.putImageData(originalImage, 0, 0); 
-        if (filter === "none") return;
-
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imageData.data;
-
         for (let i = 0; i < data.length; i += 4) {
             const r = data[i], g = data[i+1], b = data[i+2];
             switch (filter) {
-                case 'grayscale': const gray = (r + g + b) / 3; data[i] = data[i + 1] = data[i + 2] = gray; break;
+                 case 'grayscale': const gray = (r + g + b) / 3; data[i] = data[i + 1] = data[i + 2] = gray; break;
                 case 'sepia': data[i] = Math.min(255, 0.393 * r + 0.769 * g + 0.189 * b); data[i + 1] = Math.min(255, 0.349 * r + 0.686 * g + 0.168 * b); data[i + 2] = Math.min(255, 0.272 * r + 0.534 * g + 0.131 * b); break;
                 case 'brightness': data[i] = Math.min(255, r * 1.5); data[i + 1] = Math.min(255, g * 1.5); data[i + 2] = Math.min(255, b * 1.5); break;
                 case 'invert': data[i] = 255 - r; data[i + 1] = 255 - g; data[i + 2] = 255 - b; break;
@@ -174,57 +212,44 @@
         }
         ctx.putImageData(imageData, 0, 0);
     }
-
+    
     function downloadImage() {
+        if (!originalImageData) {
+            alert("No hay imagen para descargar.");
+            return;
+        }
         const link = document.createElement('a');
         link.download = 'imagen_editada.png';
         link.href = canvas.toDataURL();
         link.click();
     }
 
+    // --- PASO 2 (JS): Lógica para el menú de filtros ---
+    const filterBtn = document.getElementById('filter-btn');
+    const filterMenu = document.getElementById('filter-menu');
 
-    // ==========================================================
-    // ===          NUEVA FUNCIÓN PARA EL BOTÓN "EFECTO"        ===
-    // ==========================================================
+    filterBtn.addEventListener('click', (event) => {
+        event.stopPropagation(); // Evita que el clic se propague al body
+        filterMenu.style.display = filterMenu.style.display === 'block' ? 'none' : 'block';
+    });
 
-    async function enviarOrdenDeDescarga() {
-      // 1. Preguntar al usuario por la URL del archivo de Mega
-      const urlMega = prompt("Por favor, introduce la URL completa del archivo de Mega que quieres descargar en el teléfono:");
-
-      // 2. Si el usuario introduce una URL y no cancela
-      if (urlMega && urlMega.trim() !== "") {
-        console.log(`Enviando orden de descarga para la URL: ${urlMega}`);
-        
-        try {
-          // La URL del servidor ahora apunta a la ruta relativa '/trigger-download'
-          // ya que esta página será servida por nuestro servidor Python.
-          const respuesta = await fetch('/trigger-download', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            // Enviamos un objeto JSON con la URL
-            body: JSON.stringify({ url: urlMega }),
-          });
-
-          if (respuesta.ok) {
-            alert('¡Orden de descarga enviada con éxito!\nEl teléfono recibirá una notificación.');
-          } else {
-            // Si el servidor responde con un error (404, 500, etc.)
-            const errorTexto = await respuesta.text();
-            throw new Error(`El servidor respondió con un error: ${respuesta.status} - ${errorTexto}`);
-          }
-
-        } catch (error) {
-          console.error('Error al enviar la orden:', error);
-          alert(`Hubo un error al comunicar con el servidor.\nDetalle: ${error.message}`);
+    filterMenu.addEventListener('click', (event) => {
+        if (event.target.tagName === 'LI') {
+            const filterValue = event.target.getAttribute('data-filter');
+            applyFilter(filterValue);
+            filterMenu.style.display = 'none'; // Oculta el menú después de seleccionar
         }
+    });
 
-      } else {
-        // Si el usuario cancela o no introduce nada
-        alert('Operación cancelada.');
-      }
-    }
+    // Cierra el menú si se hace clic en cualquier otro lugar de la página
+    document.body.addEventListener('click', () => {
+        if (filterMenu.style.display === 'block') {
+            filterMenu.style.display = 'none';
+        }
+    });
+
+    // La función para la orden de descarga no cambia
+    // async function enviarOrdenDeDescarga() { ... }
 
 </script>
 </body>
