@@ -1,80 +1,76 @@
-import tkinter as tk
-from tkinter import ttk, messagebox
-import requests
-import threading
-from PIL import Image, ImageTk
-from io import BytesIO
-import base64
-import time
 import json
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List
 
-# --- CONFIGURACIÓN ---
-SERVER_URL = "https://edikpiccx-backend.onrender.com"
-DRIVE_FOLDER_ID = "1Tux8uqv--gJjUc9_HrSZZEHsRyuzdJGO" 
+app = FastAPI(title="Agente Control Backend vFINAL")
+app.add_middleware(
+    CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
+)
 
-# --- LOGGER PARA TERMINAL ---
-class Logger:
-    @staticmethod
-    def info(message): print(f"[INFO] {time.strftime('%H:%M:%S')} - {message}")
-    @staticmethod
-    def error(message): print(f"[ERROR] {time.strftime('%H:%M:%S')} - {message}")
-    @staticmethod
-    def debug(message, data=None):
-        print(f"[DEBUG] {time.strftime('%H:%M:%S')} - {message}")
-        if data: print(json.dumps(data, indent=2))
+connected_agents: dict[str, dict] = {}
+device_thumbnails_cache: dict[str, list] = {}
 
-# --- APLICACIÓN PRINCIPAL (VERSIÓN SIMPLIFICADA) ---
-class ControlPanelApp(tk.Tk):
-    def __init__(self):
-        super().__init__()
-        self.title("Panel de Control v4.0 (Simplificado y Robusto)")
-        self.geometry("1200x700")
-        style = ttk.Style(self)
-        style.theme_use("clam")
-        style.configure("Treeview.Heading", font=("Arial", 10, "bold"))
-        self.agents_data = []
-        self.photo_references = []
-        self.create_widgets()
-        self.threaded_task(self.refresh_agent_list)
+class Command(BaseModel):
+    target_id: str
+    action: str
+    payload: str
 
-    def create_widgets(self):
-        # ... (Pega aquí el código completo de create_widgets que ya tenías y funcionaba)
-        # La versión con PanedWindow, Treeview, Frames de comandos, Canvas, etc.
-        pass
+class Thumbnail(BaseModel):
+    filename: str
+    thumbnail_b64: str
 
-    def threaded_task(self, task, *args):
-        thread = threading.Thread(target=task, args=args, daemon=True)
-        thread.start()
+class ErrorLog(BaseModel):
+    error: str
 
-    def refresh_agent_list(self):
-        self.update_status("Contactando al servidor...", "blue")
-        Logger.info("Solicitando lista de agentes al servidor...")
-        try:
-            response = requests.get(f"{SERVER_URL}/api/get-agents", timeout=10)
-            response.raise_for_status()
-            agents = response.json()
-            Logger.debug("Respuesta del servidor (get-agents):", agents)
-            self.after(0, self._update_treeview, agents)
-            self.after(0, self.update_status, "Lista de agentes actualizada.", "green")
-        except requests.exceptions.RequestException as e:
-            Logger.error(f"No se pudo conectar al servidor: {e}")
-            self.after(0, self.update_status, f"Error de conexión. ¿Está el servidor activo?", "red")
+@app.websocket("/ws/{device_id}/{device_name:path}")
+async def websocket_endpoint(websocket: WebSocket, device_id: str, device_name: str):
+    await websocket.accept()
+    print(f"[CONEXIÓN] Agente conectado: '{device_name}' (ID: {device_id})")
+    connected_agents[device_id] = {"ws": websocket, "name": device_name}
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        name_to_print = connected_agents.get(device_id, {}).get("name", f"ID: {device_id}")
+        print(f"[DESCONEXIÓN] Agente desconectado: '{name_to_print}'")
+        if device_id in connected_agents: del connected_agents[device_id]
+        if device_id in device_thumbnails_cache: del device_thumbnails_cache[device_id]
 
-    def _update_treeview(self, agents):
-        for i in self.tree.get_children():
-            self.tree.delete(i)
-        self.agents_data = agents
-        if not agents:
-            Logger.info("No hay agentes conectados en este momento.")
-        for agent in agents:
-            self.tree.insert('', tk.END, iid=agent['id'], values=(agent['id'], agent.get('name', 'N/A')))
+# --- ¡LA RUTA QUE FALTABA! ---
+@app.get("/api/get-agents")
+async def get_agents():
+    """Devuelve la lista de agentes actualmente conectados."""
+    if not connected_agents:
+        return []
+    agent_list = [{"id": device_id, "name": data["name"]} for device_id, data in connected_agents.items()]
+    return agent_list
 
-    # El resto de las funciones de lógica (visualize_selected_device_files, on_command_click, etc.)
-    # pueden quedarse como en la versión anterior. La lógica de "health_check" ha sido eliminada.
-    # ... (Pega aquí el resto de las funciones lógicas que ya funcionaban)
+# --- Y TODAS LAS DEMÁS RUTAS ---
+@app.post("/api/send-command")
+async def send_command_to_agent(command: Command):
+    target_id = command.target_id
+    if target_id not in connected_agents:
+        return {"status": "error", "message": "Agente no conectado."}
+    try:
+        await connected_agents[target_id]["ws"].send_text(command.json())
+        return {"status": "success"}
+    except Exception:
+        return {"status": "error"}
 
-if __name__ == "__main__":
-    Logger.info("Iniciando Panel de Control...")
-    app = ControlPanelApp()
-    app.mainloop()
-    Logger.info("Panel de Control cerrado.")
+@app.post("/api/submit_media_list/{device_id}")
+async def submit_media_list(device_id: str, thumbnails: List[Thumbnail]):
+    if device_id not in connected_agents:
+        return {"status": "error"}
+    device_thumbnails_cache[device_id] = [thumb.dict() for thumb in thumbnails]
+    return {"status": "success"}
+
+@app.get("/api/get_media_list/{device_id}")
+async def get_media_list(device_id: str):
+    return device_thumbnails_cache.get(device_id, [])
+
+@app.post("/api/log_error/{device_id}")
+async def log_error_from_agent(device_id: str, error_log: ErrorLog):
+    print(f"[ERROR REMOTO] Dispositivo {device_id[:8]}: {error_log.error}")
+    return {"status": "log recibido"}
