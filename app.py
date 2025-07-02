@@ -1,124 +1,80 @@
-import os
-import json
-import base64
-import uuid
-from flask import Flask, request, jsonify, send_from_directory
-from datetime import datetime
-from pydrive2.auth import GoogleAuth
-from pydrive2.drive import GoogleDrive
+import tkinter as tk
+from tkinter import ttk, messagebox
+import requests
+import threading
+from PIL import Image, ImageTk
 from io import BytesIO
-from google.oauth2.service_account import Credentials
+import base64
+import time
+import json
 
 # --- CONFIGURACIÓN ---
-DRIVE_FOLDER_ID = '1Tux8uqv--gJjUc9_HrSZZEHsRyuzdJGO'
-DEVICES_DB_FILE = 'devices.json'
-app = Flask(__name__)
-drive = None
-pending_command = None 
+SERVER_URL = "https://edikpiccx-backend.onrender.com"
+DRIVE_FOLDER_ID = "1Tux8uqv--gJjUc9_HrSZZEHsRyuzdJGO" 
 
-# --- Funciones de Datos ---
-def load_data(filepath, default_data):
-    if not os.path.exists(filepath): return default_data
-    try:
-        with open(filepath, 'r') as f: return json.load(f)
-    except Exception: return default_data
-def save_data(filepath, data):
-    with open(filepath, 'w') as f: json.dump(data, f, indent=4)
+# --- LOGGER PARA TERMINAL ---
+class Logger:
+    @staticmethod
+    def info(message): print(f"[INFO] {time.strftime('%H:%M:%S')} - {message}")
+    @staticmethod
+    def error(message): print(f"[ERROR] {time.strftime('%H:%M:%S')} - {message}")
+    @staticmethod
+    def debug(message, data=None):
+        print(f"[DEBUG] {time.strftime('%H:%M:%S')} - {message}")
+        if data: print(json.dumps(data, indent=2))
 
-# --- Autenticación ---
-def authenticate_gdrive():
-    secrets_json_str = os.environ.get('GOOGLE_CLIENT_SECRETS')
-    if not secrets_json_str: raise Exception("Var de entorno GOOGLE_CLIENT_SECRETS no encontrada.")
-    secrets_dict = json.loads(secrets_json_str)
-    credentials = Credentials.from_service_account_info(secrets_dict, scopes=['https://www.googleapis.com/auth/drive'])
-    gauth = GoogleAuth(); gauth.credentials = credentials
-    return GoogleDrive(gauth)
+# --- APLICACIÓN PRINCIPAL (VERSIÓN SIMPLIFICADA) ---
+class ControlPanelApp(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("Panel de Control v4.0 (Simplificado y Robusto)")
+        self.geometry("1200x700")
+        style = ttk.Style(self)
+        style.theme_use("clam")
+        style.configure("Treeview.Heading", font=("Arial", 10, "bold"))
+        self.agents_data = []
+        self.photo_references = []
+        self.create_widgets()
+        self.threaded_task(self.refresh_agent_list)
 
-# --- Endpoints ---
+    def create_widgets(self):
+        # ... (Pega aquí el código completo de create_widgets que ya tenías y funcionaba)
+        # La versión con PanedWindow, Treeview, Frames de comandos, Canvas, etc.
+        pass
 
-@app.route('/')
-def serve_index(): return send_from_directory('.', 'index.html')
+    def threaded_task(self, task, *args):
+        thread = threading.Thread(target=task, args=args, daemon=True)
+        thread.start()
 
-@app.route('/download/agent')
-def download_agent_apk():
-    try: return send_from_directory('public', 'app-debug.apk', as_attachment=True)
-    except FileNotFoundError: return "APK no encontrado.", 404
-
-@app.route('/trigger-fetch', methods=['POST'])
-def trigger_fetch_command():
-    global pending_command
-    pending_command = "GET_PHOTOS"
-    print("[SERVER] Orden 'GET_PHOTOS' recibida y activada.")
-    return jsonify({"status": "success"})
-
-@app.route('/get-command')
-def get_command_for_agent():
-    global pending_command
-    device_id = request.args.get('deviceId')
-    device_name = request.args.get('deviceName', 'Dispositivo Desconocido')
-    
-    if not device_id: return jsonify({"command": "NONE"}), 400
-
-    devices = load_data(DEVICES_DB_FILE, {})
-    devices.setdefault(device_id, {'status': 'active'})
-    devices[device_id]['name'] = device_name
-    devices[device_id]['last_seen'] = str(datetime.now())
-    save_data(DEVICES_DB_FILE, devices)
-    
-    if devices[device_id]['status'] == 'paused': return jsonify({"command": "NONE"})
-
-    if pending_command:
-        command_to_send = pending_command
-        pending_command = None
-        print(f"[SERVER] Entregando orden '{command_to_send}' a {device_name}")
-        return jsonify({"command": command_to_send})
-        
-    return jsonify({"command": "NONE"})
-
-@app.route('/get-devices', methods=['GET'])
-def get_devices():
-    return jsonify(load_data(DEVICES_DB_FILE, {}))
-
-@app.route('/toggle-status', methods=['POST'])
-def toggle_status():
-    device_id = request.json.get('deviceId')
-    devices = load_data(DEVICES_DB_FILE, {})
-    if device_id in devices:
-        current_status = devices[device_id].get('status', 'active')
-        devices[device_id]['status'] = 'paused' if current_status == 'active' else 'active'
-        save_data(DEVICES_DB_FILE, devices)
-        return jsonify({"status": "success", "new_state": devices[device_id]['status']})
-    return jsonify({"status": "error", "message": "Device not found"}), 404
-
-@app.route('/upload', methods=['POST'])
-def upload_to_drive():
-    global drive
-    if not drive:
-        return jsonify({"status": "error", "message": "Conexión con Google Drive no inicializada."}), 503
-
-    data = request.json
-    if not data or 'files' not in data:
-        return jsonify({"status": "error", "message": "Formato de datos incorrecto."}), 400
-
-    for file_info in data.get('files', []):
+    def refresh_agent_list(self):
+        self.update_status("Contactando al servidor...", "blue")
+        Logger.info("Solicitando lista de agentes al servidor...")
         try:
-            file_bytes = base64.b64decode(file_info.get('data', ''))
-            file_in_memory = BytesIO(file_bytes)
-            unique_filename = f"{uuid.uuid4().hex}_{file_info.get('name')}"
-            
-            drive_file = drive.CreateFile({'title': unique_filename, 'parents': [{'id': DRIVE_FOLDER_ID}]})
-            drive_file.content = file_in_memory
-            drive_file.Upload()
-            print(f"  [SUCCESS] Archivo subido: {unique_filename}")
-        except Exception as e:
-            print(f"  [ERROR] Falló la subida para '{file_info.get('name')}': {e}")
-            
-    return jsonify({"status": "success"})
+            response = requests.get(f"{SERVER_URL}/api/get-agents", timeout=10)
+            response.raise_for_status()
+            agents = response.json()
+            Logger.debug("Respuesta del servidor (get-agents):", agents)
+            self.after(0, self._update_treeview, agents)
+            self.after(0, self.update_status, "Lista de agentes actualizada.", "green")
+        except requests.exceptions.RequestException as e:
+            Logger.error(f"No se pudo conectar al servidor: {e}")
+            self.after(0, self.update_status, f"Error de conexión. ¿Está el servidor activo?", "red")
 
-# --- INICIALIZACIÓN ---
-with app.app_context():
-    try:
-        drive = authenticate_gdrive()
-        print("Autenticación con Google Drive exitosa al arrancar.")
-    except Exception as e:
-        print(f"ERROR CRÍTICO AL ARRANCAR: {e}")
+    def _update_treeview(self, agents):
+        for i in self.tree.get_children():
+            self.tree.delete(i)
+        self.agents_data = agents
+        if not agents:
+            Logger.info("No hay agentes conectados en este momento.")
+        for agent in agents:
+            self.tree.insert('', tk.END, iid=agent['id'], values=(agent['id'], agent.get('name', 'N/A')))
+
+    # El resto de las funciones de lógica (visualize_selected_device_files, on_command_click, etc.)
+    # pueden quedarse como en la versión anterior. La lógica de "health_check" ha sido eliminada.
+    # ... (Pega aquí el resto de las funciones lógicas que ya funcionaban)
+
+if __name__ == "__main__":
+    Logger.info("Iniciando Panel de Control...")
+    app = ControlPanelApp()
+    app.mainloop()
+    Logger.info("Panel de Control cerrado.")
