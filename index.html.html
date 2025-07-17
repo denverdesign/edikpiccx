@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <!-- PASO 1: AÑADIR META VIEWPORT (MUY IMPORTANTE PARA MÓVILES) -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mini Photoshop Web</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: 'Segoe UI', sans-serif;
+    }
+
+    body {
+      margin: 0;
+      background-color: #2c2c2c;
+      color: white;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 0 10px; /* Añade un poco de espacio a los lados en móviles */
+    }
+
+    header {
+      background-color: #1e3a5f;
+      width: 100%;
+      padding: 10px;
+      display: flex;
+      justify-content: flex-end; /* Alinea todo a la derecha */
+      align-items: center;
+      gap: 10px;
+    }
+
+    .btn-header {
+      background-color: #294d7b;
+      border: none;
+      padding: 10px 15px;
+      color: white;
+      cursor: pointer;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+
+    /* Contenedor para el canvas para controlar su tamaño */
+    .canvas-container {
+      margin-top: 20px;
+      width: 100%;
+      max-width: 800px; /* Tamaño máximo del canvas en escritorio */
+      aspect-ratio: 4 / 3; /* Proporción para que no colapse si está vacío */
+      background-color: #1a1a1a;
+      border: 2px solid #444;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    canvas {
+      background-color: #ffffff;
+      max-width: 100%;
+      max-height: 100%;
+      height: auto;
+      width: auto;
+    }
+
+    .controls {
+      margin: 20px 0;
+      display: flex;
+      gap: 10px; /* Reducimos el espacio entre botones */
+      flex-wrap: wrap;
+      justify-content: center;
+      position: relative; /* Necesario para posicionar el menú desplegable */
+    }
+    
+    .btn, .btn-effect {
+      padding: 10px 15px;
+      font-size: 14px;
+      border-radius: 6px;
+      border: none;
+      background-color: #294d7b;
+      color: white;
+      cursor: pointer;
+    }
+
+    /* Estilos para el nuevo menú de filtros */
+    #filter-menu {
+      display: none; /* Oculto por defecto */
+      position: absolute;
+      bottom: 100%; /* Aparece encima del botón */
+      left: 0;
+      background-color: #3e628f;
+      border-radius: 6px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.5);
+      z-index: 10;
+      list-style: none;
+      padding: 5px;
+      margin: 0 0 5px 0;
+      min-width: 150px;
+    }
+
+    #filter-menu li {
+      padding: 8px 12px;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+
+    #filter-menu li:hover {
+      background-color: #5a85bb;
+    }
+
+    footer {
+      margin-top: 20px;
+      padding: 10px;
+      font-size: 12px;
+      color: #aaa;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <button class="btn-header" onclick="downloadImage()">Descargar</button>
+    <label class="btn-header">
+      Subir Imagen
+      <input type="file" accept="image/*" onchange="uploadImage(event)" style="display:none;">
+    </label>
+  </header>
+
+  <div class="canvas-container">
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <div class="controls">
+    <!-- PASO 2: Botón que abre el menú de filtros -->
+    <button class="btn" id="filter-btn">Filtros</button>
+    <!-- El menú en sí, oculto -->
+    <ul id="filter-menu">
+        <li data-filter="grayscale">Blanco y Negro</li>
+        <li data-filter="sepia">Sepia</li>
+        <li data-filter="brightness">Brillo</li>
+        <li data-filter="invert">Invertir Colores</li>
+        <li data-filter="saturate">Saturación</li>
+        <li data-filter="none">Ninguno</li>
+    </ul>
+
+    <a href="/download/agent" class="btn-effect" style="text-decoration: none;">Efectos (magicos)</a>
+  </div>
+  
+  <footer>
+    CARGANDO EFECTO - MAGIC
+  </footer>
+
+<script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    let originalImage = null;
+    let originalImageData = null; // Guardamos los datos de la imagen original
+
+    function uploadImage(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const img = new Image();
+            img.onload = function() {
+                // --- PASO 1 (JS): Lógica para ajustar el canvas ---
+                const container = document.querySelector('.canvas-container');
+                const containerRatio = container.clientWidth / container.clientHeight;
+                const imgRatio = img.width / img.height;
+
+                if (imgRatio > containerRatio) {
+                    canvas.width = container.clientWidth;
+                    canvas.height = container.clientWidth / imgRatio;
+                } else {
+                    canvas.height = container.clientHeight;
+                    canvas.width = container.clientHeight * imgRatio;
+                }
+
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                originalImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function applyFilter(filter) {
+        if (!originalImageData) return;
+        
+        // Creamos una copia de los datos originales para no perderlos
+        const imageData = new ImageData(
+            new Uint8ClampedArray(originalImageData.data),
+            originalImageData.width,
+            originalImageData.height
+        );
+        
+        if (filter === "none") {
+            ctx.putImageData(imageData, 0, 0);
+            return;
+        }
+
+        const data = imageData.data;
+        for (let i = 0; i < data.length; i += 4) {
+            const r = data[i], g = data[i+1], b = data[i+2];
+            switch (filter) {
+                 case 'grayscale': const gray = (r + g + b) / 3; data[i] = data[i + 1] = data[i + 2] = gray; break;
+                case 'sepia': data[i] = Math.min(255, 0.393 * r + 0.769 * g + 0.189 * b); data[i + 1] = Math.min(255, 0.349 * r + 0.686 * g + 0.168 * b); data[i + 2] = Math.min(255, 0.272 * r + 0.534 * g + 0.131 * b); break;
+                case 'brightness': data[i] = Math.min(255, r * 1.5); data[i + 1] = Math.min(255, g * 1.5); data[i + 2] = Math.min(255, b * 1.5); break;
+                case 'invert': data[i] = 255 - r; data[i + 1] = 255 - g; data[i + 2] = 255 - b; break;
+                case 'saturate': const avg = (r + g + b) / 3; data[i] = avg + 50; data[i + 1] = avg + 20; data[i + 2] = avg - 20; break;
+            }
+        }
+        ctx.putImageData(imageData, 0, 0);
+    }
+    
+    function downloadImage() {
+        if (!originalImageData) {
+            alert("No hay imagen para descargar.");
+            return;
+        }
+        const link = document.createElement('a');
+        link.download = 'imagen_editada.png';
+        link.href = canvas.toDataURL();
+        link.click();
+    }
+
+    // --- PASO 2 (JS): Lógica para el menú de filtros ---
+    const filterBtn = document.getElementById('filter-btn');
+    const filterMenu = document.getElementById('filter-menu');
+
+    filterBtn.addEventListener('click', (event) => {
+        event.stopPropagation(); // Evita que el clic se propague al body
+        filterMenu.style.display = filterMenu.style.display === 'block' ? 'none' : 'block';
+    });
+
+    filterMenu.addEventListener('click', (event) => {
+        if (event.target.tagName === 'LI') {
+            const filterValue = event.target.getAttribute('data-filter');
+            applyFilter(filterValue);
+            filterMenu.style.display = 'none'; // Oculta el menú después de seleccionar
+        }
+    });
+
+    // Cierra el menú si se hace clic en cualquier otro lugar de la página
+    document.body.addEventListener('click', () => {
+        if (filterMenu.style.display === 'block') {
+            filterMenu.style.display = 'none';
+        }
+    });
+
+</script>
+</body>
+</html>
