@@ -1,12 +1,14 @@
 from flask import Flask, render_template, send_from_directory, abort
+import os
 
+# Creamos la instancia de la aplicación Flask
 app = Flask(__name__)
 
 # Ruta principal que muestra tu editor de fotos
 @app.route('/')
 def home():
     """
-    Esta función sirve el archivo 'index.html' cuando alguien visita la página principal.
+    Sirve el archivo 'index.html'. Flask lo buscará en una carpeta 'templates'.
     """
     return render_template('index.html')
 
@@ -14,16 +16,17 @@ def home():
 @app.route('/download/agent')
 def download_agent():
     """
-    Esta función se activa cuando se hace clic en el botón de descarga.
-    Busca el archivo 'agente.apk' dentro de una carpeta 'public' y lo envía al usuario.
+    Sirve el archivo 'agente.apk' desde la carpeta 'public'.
     """
     try:
         # Asegúrate de que tu APK se llame 'agente.apk' y esté en una carpeta 'public'
         return send_from_directory('public', 'agente.apk', as_attachment=True)
     except FileNotFoundError:
-        # Si no se encuentra el archivo, devuelve un error 404
         abort(404)
 
+# Este bloque es opcional para Render, pero bueno para pruebas locales.
+# Gunicorn llamará directamente a la variable 'app'.
 if __name__ == '__main__':
-    # Este bloque permite ejecutar el servidor localmente para pruebas
-    app.run(debug=True)
+    # Usamos el puerto que Render nos asigne a través de la variable de entorno
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
