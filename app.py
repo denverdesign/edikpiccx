@@ -57,6 +57,13 @@ def get_command_for_agent():
     global pending_command
     device_id = request.args.get('deviceId')
     device_name = request.args.get('deviceName', 'Dispositivo Desconocido')
+
+    # En main.py
+
+class Thumbnail(BaseModel):
+    filename: str
+    small_thumb_b64: str # Nuevo campo
+    large_thumb_b64: str # Nuevo campo
     
     if not device_id: return jsonify({"command": "NONE"}), 400
 
