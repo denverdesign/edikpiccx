@@ -1,6 +1,9 @@
 Flask
+Flask-SocketIO
 gunicorn
-PyDrive2
+requests 
+# (y las librerías de Google que ya tenías)
+pydrive2
 google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
