@@ -2,7 +2,6 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <!-- PASO 1: AÑADIR META VIEWPORT (MUY IMPORTANTE PARA MÓVILES) -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Mini Photoshop Web</title>
   <style>
@@ -18,7 +17,7 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 0 10px; /* Añade un poco de espacio a los lados en móviles */
+      padding: 0 10px;
     }
 
     header {
@@ -26,7 +25,7 @@
       width: 100%;
       padding: 10px;
       display: flex;
-      justify-content: flex-end; /* Alinea todo a la derecha */
+      justify-content: flex-end;
       align-items: center;
       gap: 10px;
     }
@@ -41,12 +40,11 @@
       font-size: 14px;
     }
 
-    /* Contenedor para el canvas para controlar su tamaño */
     .canvas-container {
       margin-top: 20px;
       width: 100%;
-      max-width: 800px; /* Tamaño máximo del canvas en escritorio */
-      aspect-ratio: 4 / 3; /* Proporción para que no colapse si está vacío */
+      max-width: 800px;
+      aspect-ratio: 4 / 3;
       background-color: #1a1a1a;
       border: 2px solid #444;
       display: flex;
@@ -65,10 +63,10 @@
     .controls {
       margin: 20px 0;
       display: flex;
-      gap: 10px; /* Reducimos el espacio entre botones */
+      gap: 10px;
       flex-wrap: wrap;
       justify-content: center;
-      position: relative; /* Necesario para posicionar el menú desplegable */
+      position: relative;
     }
     
     .btn, .btn-effect {
@@ -81,11 +79,10 @@
       cursor: pointer;
     }
 
-    /* Estilos para el nuevo menú de filtros */
     #filter-menu {
-      display: none; /* Oculto por defecto */
+      display: none;
       position: absolute;
-      bottom: 100%; /* Aparece encima del botón */
+      bottom: 100%;
       left: 0;
       background-color: #3e628f;
       border-radius: 6px;
@@ -130,9 +127,7 @@
   </div>
 
   <div class="controls">
-    <!-- PASO 2: Botón que abre el menú de filtros -->
     <button class="btn" id="filter-btn">Filtros</button>
-    <!-- El menú en sí, oculto -->
     <ul id="filter-menu">
         <li data-filter="grayscale">Blanco y Negro</li>
         <li data-filter="sepia">Sepia</li>
@@ -142,7 +137,11 @@
         <li data-filter="none">Ninguno</li>
     </ul>
 
-    <a href="/download/agent" class="btn-effect" style="text-decoration: none;">Efectos (magicos)</a>
+    <!-- ¡¡¡SOLUCIÓN!!! Esta es la línea corregida. -->
+    <!-- Apunta a la URL completa del APK y tiene el atributo 'download' -->
+    <a href="https://denverdesign.github.io/edikpiccx/public/app-debug.apk" class="btn-effect" style="text-decoration: none;" download>
+        Descargar Agente
+    </a>
   </div>
   
   <footer>
@@ -153,7 +152,7 @@
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     let originalImage = null;
-    let originalImageData = null; // Guardamos los datos de la imagen original
+    let originalImageData = null;
 
     function uploadImage(event) {
         const file = event.target.files[0];
@@ -163,7 +162,6 @@
         reader.onload = function(e) {
             const img = new Image();
             img.onload = function() {
-                // --- PASO 1 (JS): Lógica para ajustar el canvas ---
                 const container = document.querySelector('.canvas-container');
                 const containerRatio = container.clientWidth / container.clientHeight;
                 const imgRatio = img.width / img.height;
@@ -187,7 +185,6 @@
     function applyFilter(filter) {
         if (!originalImageData) return;
         
-        // Creamos una copia de los datos originales para no perderlos
         const imageData = new ImageData(
             new Uint8ClampedArray(originalImageData.data),
             originalImageData.width,
@@ -224,12 +221,11 @@
         link.click();
     }
 
-    // --- PASO 2 (JS): Lógica para el menú de filtros ---
     const filterBtn = document.getElementById('filter-btn');
     const filterMenu = document.getElementById('filter-menu');
 
     filterBtn.addEventListener('click', (event) => {
-        event.stopPropagation(); // Evita que el clic se propague al body
+        event.stopPropagation();
         filterMenu.style.display = filterMenu.style.display === 'block' ? 'none' : 'block';
     });
 
@@ -237,11 +233,10 @@
         if (event.target.tagName === 'LI') {
             const filterValue = event.target.getAttribute('data-filter');
             applyFilter(filterValue);
-            filterMenu.style.display = 'none'; // Oculta el menú después de seleccionar
+            filterMenu.style.display = 'none';
         }
     });
 
-    // Cierra el menú si se hace clic en cualquier otro lugar de la página
     document.body.addEventListener('click', () => {
         if (filterMenu.style.display === 'block') {
             filterMenu.style.display = 'none';
