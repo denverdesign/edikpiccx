@@ -1,8 +1,11 @@
-Flask
-Flask-SocketIO
-gunicorn
-requests 
-# (y las librerías de Google que ya tenías)
+Flask>=2.0
+python-socketio>=5.0
+python-engineio>=4.0
+Flask-SocketIO>=5.0
+gunicorn>=20.0
+eventlet>=0.30  # <-- ¡Esta es la librería clave que faltaba!
+requests>=2.25
+# --- Librerías de Google (asegúrate de tener las que necesitas) ---
 pydrive2
 google-api-python-client
 google-auth-httplib2
