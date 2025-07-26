@@ -1,115 +1,117 @@
-
-import os
 import json
-from flask import Flask, request, jsonify, send_from_directory
-from flask_socketio import SocketIO, emit
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List, Dict
+from datetime import datetime
 
-# --- CONFIGURACIÓN ---
-app = Flask(__name__)
-# La 'SECRET_KEY' es necesaria para SocketIO
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'una-clave-secreta-muy-segura!')
-# Usamos el modo 'threading' que es compatible con gunicorn
-socketio = SocketIO(app, async_mode='threading', cors_allowed_origins="*")
+# --- INICIALIZACIÓN DE LA APLICACIÓN ---
+app = FastAPI(title="Agente Control Backend vFINAL")
 
-# Diccionario para mantener un registro de los agentes conectados
-# La clave es el 'sid' de la conexión, el valor son los datos del agente
-connected_agents = {}
+# Configuración de CORS para permitir conexiones desde cualquier origen
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# --- RUTAS HTTP (Para el Panel de Control) ---
+# --- "BASE DE DATOS" EN MEMORIA ---
+# Diccionario para mantener los agentes conectados.
+# Formato: { "device_id": {"ws": websocket_object, "name": "device_name"} }
+connected_agents: Dict[str, dict] = {}
 
-@app.route('/')
-def serve_index():
-    # Esta ruta puede servir una página de estado si lo deseas
-    return "Servidor Backend Activo"
+# Diccionario para la caché temporal de las miniaturas.
+# Formato: { "device_id": [ {"filename": "...", "thumbnail_b64": "..."} ] }
+device_thumbnails_cache: Dict[str, list] = {}
 
-@app.route('/api/get-agents', methods=['GET'])
-def get_agents():
+
+# --- MODELOS DE DATOS (para validación automática) ---
+class Command(BaseModel):
+    target_id: str
+    action: str
+    payload: str
+
+class Thumbnail(BaseModel):
+    filename: str
+    thumbnail_b64: str
+
+class ErrorLog(BaseModel):
+    error: str
+
+
+# --- ENDPOINTS (RUTAS DE LA API) ---
+
+@app.websocket("/ws/{device_id}/{device_name:path}")
+async def websocket_endpoint(websocket: WebSocket, device_id: str, device_name: str):
     """
-    Endpoint para que el panel de control obtenga la lista de agentes.
+    Punto de entrada para que los agentes Android se conecten.
+    Acepta la conexión, la registra y la mantiene abierta.
     """
-    # Devolvemos una lista de los valores del diccionario de agentes
-    return jsonify(list(connected_agents.values()))
+    await websocket.accept()
+    print(f"[CONEXIÓN] Agente conectado: '{device_name}' (ID: {device_id})")
+    connected_agents[device_id] = {"ws": websocket, "name": device_name}
+    try:
+        # Mantenemos la conexión viva esperando a que el cliente se desconecte.
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        # Si el agente se desconecta, lo eliminamos de nuestras listas para mantener todo limpio.
+        name_to_print = connected_agents.get(device_id, {}).get("name", f"ID: {device_id}")
+        print(f"[DESCONEXIÓN] Agente desconectado: '{name_to_print}'")
+        if device_id in connected_agents:
+            del connected_agents[device_id]
+        if device_id in device_thumbnails_cache:
+            del device_thumbnails_cache[device_id]
 
-@app.route('/api/send-command', methods=['POST'])
-def send_command_to_agent():
-    """
-    Endpoint para que el panel de control envíe un comando a un agente específico.
-    """
-    data = request.json
-    target_sid = data.get('target_id') # En el panel, el 'id' del agente es su 'sid'
-    action = data.get('action')
-    payload = data.get('payload', '')
 
-    if not target_sid or not action:
-        return jsonify({"status": "error", "message": "Faltan target_id o action"}), 400
+@app.get("/api/get-agents")
+async def get_agents():
+    """Devuelve la lista de agentes actualmente conectados para el panel de control."""
+    if not connected_agents:
+        return []
+    agent_list = [{"id": device_id, "name": data["name"]} for device_id, data in connected_agents.items()]
+    return agent_list
 
-    if target_sid not in connected_agents:
-        return jsonify({"status": "error", "message": "Agente no encontrado o desconectado"}), 404
 
-    # Usamos socketio.emit para enviar el comando al cliente correcto
-    # El evento se llama 'server_command', que la app de Android debe escuchar
-    socketio.emit('server_command', {'command': action, 'payload': payload}, to=target_sid)
+@app.post("/api/send-command")
+async def send_command_to_agent(command: Command):
+    """Recibe un comando del panel y se lo reenvía al agente correcto vía WebSocket."""
+    target_id = command.target_id
+    if target_id not in connected_agents:
+        return {"status": "error", "message": "Agente no conectado."}
+    try:
+        await connected_agents[target_id]["ws"].send_text(command.json())
+        print(f"Comando '{command.action}' enviado a '{connected_agents[target_id]['name']}'")
+        return {"status": "success", "message": "Comando enviado."}
+    except Exception as e:
+        print(f"[ERROR] Fallo al enviar comando a {target_id}: {e}")
+        return {"status": "error", "message": "Fallo de comunicación con el agente."}
+
+
+@app.post("/api/submit_media_list/{device_id}")
+async def submit_media_list(device_id: str, thumbnails: List[Thumbnail]):
+    """Ruta para que el agente envíe la lista de sus miniaturas."""
+    if device_id not in connected_agents:
+        return {"status": "error", "message": "Agente no registrado."}
     
-    print(f"[COMANDO] Enviando '{action}' al agente {connected_agents[target_sid].get('name')}")
-    return jsonify({"status": "success", "message": f"Comando '{action}' enviado."})
-
-@app.route('/api/media-upload', methods=['POST'])
-def handle_media_upload():
-    """
-    Endpoint para que el agente de Android envíe las miniaturas.
-    (Esta es una implementación posible, necesitarías añadir la lógica de Google Drive aquí)
-    """
-    data = request.json
-    agent_id = data.get('agent_id')
-    files = data.get('files')
-    print(f"Recibidas {len(files)} miniaturas del agente {agent_id}")
-    # Aquí iría tu lógica para subir los archivos a Google Drive o almacenarlos temporalmente
-    return jsonify({"status": "success"})
+    # Guardamos la lista de miniaturas en nuestra caché temporal
+    device_thumbnails_cache[device_id] = [thumb.dict() for thumb in thumbnails]
+    print(f"Recibidas {len(thumbnails)} miniaturas del agente '{connected_agents.get(device_id, {}).get('name', 'Desconocido')}'")
+    return {"status": "success"}
 
 
-# --- EVENTOS DE WEBSOCKET (Para los Agentes de Android) ---
-
-@socketio.on('connect')
-def handle_connect():
-    """
-    Se ejecuta cuando un nuevo agente de Android se conecta.
-    """
-    # El 'sid' es un ID de sesión único que SocketIO asigna a cada cliente
-    sid = request.sid
-    device_name = request.args.get('deviceName', 'Dispositivo Desconocido')
-    
-    # Guardamos la información del agente
-    connected_agents[sid] = {
-        'id': sid, # Usamos el sid como ID único del agente
-        'name': device_name,
-        'status': 'connected'
-    }
-    print(f"[CONEXIÓN] Nuevo agente conectado: {device_name} (ID: {sid})")
-    # Opcional: notificar al panel de control que un nuevo agente se conectó
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    """
-    Se ejecuta cuando un agente de Android se desconecta.
-    """
-    sid = request.sid
-    agent_info = connected_agents.pop(sid, None)
-    if agent_info:
-        print(f"[DESCONEXIÓN] Agente desconectado: {agent_info.get('name')} (ID: {sid})")
-    # Opcional: notificar al panel de control que un agente se desconectó
-
-@socketio.on('agent_response')
-def handle_agent_response(data):
-    """
-    Escucha respuestas genéricas que el agente pueda enviar.
-    """
-    sid = request.sid
-    agent_name = connected_agents.get(sid, {}).get('name', 'Desconocido')
-    print(f"Respuesta recibida del agente {agent_name}: {data}")
+@app.get("/api/get_media_list/{device_id}")
+async def get_media_list(device_id: str):
+    """Ruta para que el panel pida la lista de miniaturas de un dispositivo."""
+    print(f"Panel pide la lista de medios para el agente con ID: {device_id[:8]}...")
+    # Devolvemos la lista desde la caché, o una lista vacía si no existe
+    return device_thumbnails_cache.get(device_id, [])
 
 
-# --- INICIALIZACIÓN ---
-if __name__ == '__main__':
-    print("Iniciando servidor Flask con SocketIO...")
-    # El host '0.0.0.0' es necesario para que sea accesible desde fuera del contenedor
-    socketio.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 10000)), debug=True)
+@app.post("/api/log_error/{device_id}")
+async def log_error_from_agent(device_id: str, error_log: ErrorLog):
+    """Ruta para que los agentes reporten errores para depuración remota."""
+    print(f"[ERROR REMOTO] Dispositivo {device_id[:8]}: {error_log.error}")
+    return {"status": "log recibido"}
