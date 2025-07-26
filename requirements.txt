@@ -1,3 +1,8 @@
+
+fastapi
+uvicorn[standard]
+websockets
+pydantic
 Flask>=2.0
 python-socketio>=5.0
 python-engineio>=4.0
