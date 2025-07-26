@@ -229,11 +229,19 @@ class ControlPanelApp(tk.Tk):
                 except Exception as e:
                     messagebox.showerror("Error al Guardar", f"No se pudo guardar la imagen: {e}")
 
-    def on_command_click(self, action, payload=""):
-        selected_id = self.get_selected_agent_id()
-        if not selected_id: return
-        command = {"target_id": selected_id, "action": action, "payload": payload}
-        self.threaded_task(self._do_send_command, command)
+    # En main.py, dentro de send_command_to_agent
+
+    # ... (código anterior) ...
+    
+    # ¡SOLUCIÓN! Usamos socketio.send() para enviar un mensaje de texto plano (JSON)
+    # en lugar de un evento con nombre.
+    command_to_send = {'command': action, 'payload': payload}
+    socketio.send(json.dumps(command_to_send), to=target_sid)
+    
+    agent_name = connected_agents[target_sid].get('name', 'Desconocido')
+    print(f"[COMANDO] Enviando comando '{action}' al agente '{agent_name}' (ID: {target_sid})")
+    
+    return jsonify({"status": "success", "message": f"Comando '{action}' enviado."})
 
     def _do_send_command(self, command):
         Logger.info(f"Preparando para enviar comando '{command['action']}' al agente {command['target_id'][:8]}.")
